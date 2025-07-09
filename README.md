@@ -1,1 +1,1 @@
-# AnalytIQ
+# Analytics IQ
