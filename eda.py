@@ -1,15 +1,16 @@
-from dotenv import load_dotenv
 import os
+from dotenv import load_dotenv
+import google.generativeai as genai
 
-# Load API Key from .env
-load_dotenv(dotenv_path="gpt.env")
-openai_api_key = os.getenv("OPENAI_API_KEY")
+load_dotenv()
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-from openai import OpenAI
-client = OpenAI(
-    api_key=openai_api_key,
-    base_url="https://openrouter.ai/api/v1"
-)
+if not GOOGLE_API_KEY:
+    raise ValueError("GOOGLE_API_KEY not found. Please check your .env file.")
+
+genai.configure(api_key=GOOGLE_API_KEY)
+
+model = genai.GenerativeModel("models/gemini-2.5-pro")
 
 # Streamlit & EDA Imports
 import streamlit as st
@@ -179,12 +180,22 @@ def clean_and_impute_df(df):
                 df_cleaned[col].fillna(df_cleaned[col].mode().iloc[0], inplace=True)
     return df_cleaned
 
-
 # ---------------- GPT FUNCTIONS ----------------
+
+# ✅ Define Gemini Pro model globally (only once, renamed to gpt_model)
+try:
+    gpt_model = genai.GenerativeModel("models/gemini-2.5-pro")
+except Exception as e:
+    st.warning(f"⚠️ Gemini Model Initialization Failed: {e}")
+    gpt_model = None
+
 def generate_summary_from_df(df):
     """
-    Generate a professional EDA summary using GPT based on the dataset.
+    Generate a professional EDA summary using Gemini Pro based on the dataset.
     """
+    if gpt_model is None:
+        return "⚠️ GPT Summary Failed: Model not initialized"
+
     rows, cols = df.shape
     missing = df.isnull().mean().sort_values(ascending=False).head(5).to_dict()
     types = df.dtypes.value_counts().to_dict()
@@ -210,31 +221,27 @@ Write the summary in **clean, professional markdown bullet points** for executiv
 """
 
     try:
-        response = client.chat.completions.create(
-            model="mistralai/mistral-7b-instruct",
-            messages=[
-                {"role": "system", "content": "You are a skilled data analyst who explains findings clearly."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7,
-            max_tokens=700
+        response = gpt_model.generate_content(
+            contents=[{"role": "user", "parts": [prompt]}]
         )
-        return "## 📊 EDA Insights\n\n" + response.choices[0].message.content.strip()
+        return "## 📊 EDA Insights\n\n" + response.text.strip()
     except Exception as e:
         return f"⚠️ GPT Summary Failed: {str(e)}"
 
-
 def generate_model_explainer(model_name, target, features, metrics):
     """
-    Generate a model explanation using GPT focused on dataset-specific insights.
+    Generate a model explanation using Gemini Pro focused on dataset-specific insights.
     """
+    if gpt_model is None:
+        return "⚠️ GPT Model Explanation Failed: Model not initialized"
+
     prompt = f"""
 You are a machine learning analyst. A model has been trained as part of an analytical project.
 
 ### Model Info
 - Model Used: {model_name}
 - Target Column: {target}
-- Features: {features}
+- Features: {', '.join(features)}
 - Evaluation Metrics: {metrics}
 
 ### Write a clear, markdown-formatted explanation covering:
@@ -244,23 +251,18 @@ You are a machine learning analyst. A model has been trained as part of an analy
 - **Potential limitations** or caveats (e.g., small dataset, missing data impact, feature bias).
 - **Practical recommendations**: how could the model be improved or deployed for decision-making?
 
-Keep it **insightful and contextual** (don’t explain “what is logistic regression” — assume the reader knows). 
+Keep it **insightful and contextual & little smal to the point ** (don’t explain “what is logistic regression” — assume the reader knows). 
 Instead, focus on **what this model tells us about THIS dataset**.
 """
 
     try:
-        response = client.chat.completions.create(
-            model="mistralai/mistral-7b-instruct",
-            messages=[
-                {"role": "system", "content": "You are a machine learning analyst who explains results with data context."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7,
-            max_tokens=500
+        response = gpt_model.generate_content(
+            contents=[{"role": "user", "parts": [prompt]}]
         )
-        return "## 🤖 Model Insights\n\n" + response.choices[0].message.content.strip()
+        return "## 🤖 Model Insights\n\n" + response.text.strip()
     except Exception as e:
         return f"⚠️ GPT Model Explanation Failed: {str(e)}"
+
 
 # ---------------- OPTUNA FUNCTION ----------------
 def optuna_objective(trial, X, y, problem_type, model_choice):
@@ -389,20 +391,44 @@ if selection == "AutoML":
         st.session_state.ml_plots = []
 
     if st.session_state.cleaned_df is not None:
-        df_encoded = pd.get_dummies(st.session_state.cleaned_df, drop_first=True)
+        df_original = st.session_state.cleaned_df.copy()
+
+        # Auto-detect target (last column if binary/categorical)
+        inferred_target = df_original.select_dtypes(include=['object', 'bool', 'category']).columns[-1] \
+            if df_original.select_dtypes(include=['object', 'bool', 'category']).shape[1] > 0 \
+            else df_original.columns[-1]
+
+        default_target = st.session_state.get("selected_target", inferred_target)
+
+        # Drop high-null columns from features
+        null_threshold = 0.5
+        cleaned_features = df_original.drop(columns=[default_target])
+        cleaned_features = cleaned_features.loc[:, cleaned_features.isnull().mean() < null_threshold]
+        default_features = cleaned_features.columns.tolist()
+
+        st.markdown(f"**Detected Target:** `{default_target}`")
+        st.markdown(f"**Selected Features:** `{', '.join(default_features)}`")
+
+        # [🔁] Optional Manual Override
+        with st.expander("🔁 Change Target/Features Manually"):
+            manual_target = st.selectbox("🎯 Select Target Column", df_original.columns, index=df_original.columns.get_loc(default_target))
+            manual_features = st.multiselect("📊 Select Feature Columns", df_original.columns.drop(manual_target), default=default_features)
+
+            if manual_target and manual_features:
+                 target_col = manual_target
+                 feature_cols = manual_features
+            else:
+                 target_col = default_target
+                 feature_cols = default_features
+           
+        # Encode data
+        df_encoded = pd.get_dummies(df_original[[*feature_cols, target_col]], drop_first=True)
         all_cols = df_encoded.columns.tolist()
+        encoded_target_col = [col for col in df_encoded.columns if col.startswith(target_col)][0] \
+            if target_col not in df_encoded.columns else target_col
 
-        # Auto target detection
-        possible_target = st.session_state.cleaned_df.select_dtypes(include=['object', 'bool']).columns[-1] \
-            if st.session_state.cleaned_df.select_dtypes(include=['object', 'bool']).shape[1] > 0 \
-            else st.session_state.cleaned_df.columns[-1]
-        target_col = possible_target if possible_target in all_cols else all_cols[-1]
-        st.markdown(f"**Auto-detected Target Column:** `{target_col}`")
-
-        # Feature columns
-        feature_cols = [col for col in all_cols if col != target_col]
-        problem_type = "Classification" if len(df_encoded[target_col].unique()) <= 10 else "Regression"
-        st.markdown(f"**Detected Problem Type:** {problem_type}")
+        problem_type = "Classification" if len(df_encoded[encoded_target_col].unique()) <= 10 else "Regression"
+        st.markdown(f"**Detected Problem Type:** `{problem_type}`")
 
         # Model selection
         model_options = {
@@ -415,8 +441,8 @@ if selection == "AutoML":
             with st.spinner("Training Model..."):
                 try:
                     # Prepare data
-                    X = df_encoded[feature_cols]
-                    y = df_encoded[target_col]
+                    X = df_encoded.drop(columns=[encoded_target_col])
+                    y = df_encoded[encoded_target_col]
                     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
                     # ✅ Choose model
@@ -460,7 +486,6 @@ if selection == "AutoML":
                         st.markdown(metrics)
                         st.session_state.ml_metrics = metrics
 
-
                         # ✅ ROC and PR Curve
                         if hasattr(model, "predict_proba"):
                             y_proba = model.predict_proba(X_test)[:, 1]
@@ -491,7 +516,6 @@ if selection == "AutoML":
                         metrics = f"**RMSE**: {rmse:.2f} | **R² Score**: {r2:.2f}"
                         st.markdown(metrics)
                         st.session_state.ml_metrics = metrics
-
 
                         # ✅ Residual Plot
                         fig, ax = plt.subplots()
