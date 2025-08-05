@@ -224,7 +224,11 @@ Write the summary in **clean, professional markdown bullet points** for executiv
         response = gpt_model.generate_content(
             contents=[{"role": "user", "parts": [prompt]}]
         )
-        return "## 📊 EDA Insights\n\n" + response.text.strip()
+        if response.candidates and response.candidates[0].content.parts:
+            summary_text = response.candidates[0].content.parts[0].text.strip()
+            return "## 📊 EDA Insights\n\n" + summary_text
+        else:
+            return "⚠️ GPT Summary Failed: No response returned by Gemini."
     except Exception as e:
         return f"⚠️ GPT Summary Failed: {str(e)}"
 
@@ -251,7 +255,7 @@ You are a machine learning analyst. A model has been trained as part of an analy
 - **Potential limitations** or caveats (e.g., small dataset, missing data impact, feature bias).
 - **Practical recommendations**: how could the model be improved or deployed for decision-making?
 
-Keep it **insightful and contextual & little smal to the point ** (don’t explain “what is logistic regression” — assume the reader knows). 
+Keep it **insightful and contextual** (don’t explain “what is logistic regression” — assume the reader knows). 
 Instead, focus on **what this model tells us about THIS dataset**.
 """
 
@@ -259,7 +263,11 @@ Instead, focus on **what this model tells us about THIS dataset**.
         response = gpt_model.generate_content(
             contents=[{"role": "user", "parts": [prompt]}]
         )
-        return "## 🤖 Model Insights\n\n" + response.text.strip()
+        if response.candidates and response.candidates[0].content.parts:
+            summary_text = response.candidates[0].content.parts[0].text.strip()
+            return "## 🤖 Model Insights\n\n" + summary_text
+        else:
+            return "⚠️ GPT Model Explanation Failed: No response returned by Gemini."
     except Exception as e:
         return f"⚠️ GPT Model Explanation Failed: {str(e)}"
 
@@ -474,6 +482,7 @@ if selection == "AutoML":
                     st.session_state.best_model = model
 
                     st.success("✅ Model Trained!")
+                    
 
                     # 📊 Evaluation Metrics
                     st.subheader("📊 Evaluation Metrics")
@@ -485,6 +494,7 @@ if selection == "AutoML":
                         metrics = f"**Accuracy**: {acc:.2f} | **Precision**: {prec:.2f} | **Recall**: {recall:.2f} | **F1 Score**: {f1:.2f}"
                         st.markdown(metrics)
                         st.session_state.ml_metrics = metrics
+                        evaluation_summary = f"Accuracy: {acc:.2f}\nPrecision: {prec:.2f}\nRecall: {recall:.2f}"
 
                         # ✅ ROC and PR Curve
                         if hasattr(model, "predict_proba"):
@@ -616,15 +626,8 @@ if selection == "Model Evaluation":
             ax.set_ylabel("Residuals")
             st.pyplot(fig)
 
-        # Feature Importance
-        st.markdown("### 🟡 Feature Importance")
-        feature_imp = pd.Series(model.feature_importances_, index=X.columns).sort_values(ascending=False)
-        fig, ax = plt.subplots()
-        feature_imp.plot(kind='bar', color='orange', ax=ax)
-        ax.set_title("Feature Importance")
-        st.pyplot(fig)
-    else:
-        st.warning("Clean data first.")
+       
+
 
 # ✅ Show download button ONLY after AutoML is trained
 if "model_trained" in st.session_state and st.session_state.model_trained:
@@ -632,9 +635,10 @@ if "model_trained" in st.session_state and st.session_state.model_trained:
     df_final = st.session_state.cleaned_df
     gpt_summary = st.session_state.get("gpt_summary", "No GPT Summary Generated.")
     best_model = st.session_state.get("best_model", "Random Forest (Default)")
+    evaluation_summary = st.session_state.get("evaluation_summary", "No evaluation summary available.")
 
     pdf_path = "project_report.pdf"
-    generate_project_report_pdf(df_final, gpt_summary, best_model, pdf_path)
+    generate_project_report_pdf(df_final, evaluation_summary, gpt_summary, best_model, pdf_path)
 
     with open(pdf_path, "rb") as f:
         st.sidebar.download_button(
@@ -646,5 +650,7 @@ if "model_trained" in st.session_state and st.session_state.model_trained:
         )
 else:
     st.sidebar.info("⚠️ Complete all steps (Upload → Clean → EDA → GPT → AutoML) to unlock the report.")
+
+
 
 
