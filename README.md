@@ -31,7 +31,7 @@
 
 ## 🖼️ UI Highlights
 
-- Professional dark theme with dark green + black palette
+- Professional dark theme with purple + black palette
 - Slim sidebar with section navigation
 - Responsive layout with styled components
 
