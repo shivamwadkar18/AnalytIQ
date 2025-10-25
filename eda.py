@@ -1,15 +1,21 @@
 import os
+import streamlit as st
 from dotenv import load_dotenv
 import google.generativeai as genai
 
+# Load .env file for local development
 load_dotenv()
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
+# Try to get key from Streamlit Secrets first, then fallback to local .env
+GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", os.getenv("GOOGLE_API_KEY"))
+
+# Graceful handling if no key found
 if not GOOGLE_API_KEY:
-    raise ValueError("GOOGLE_API_KEY not found. Please check your .env file.")
+    st.error("❌ GOOGLE_API_KEY not found. Please set it in Streamlit Secrets or .env file.")
+    st.stop()
 
+# Configure Gemini model
 genai.configure(api_key=GOOGLE_API_KEY)
-
 model = genai.GenerativeModel("models/gemini-2.5-pro")
 
 # Streamlit & EDA Imports
@@ -650,6 +656,7 @@ if "model_trained" in st.session_state and st.session_state.model_trained:
         )
 else:
     st.sidebar.info("⚠️ Complete all steps (Upload → Clean → EDA → GPT → AutoML) to unlock the report.")
+
 
 
 
