@@ -3,12 +3,13 @@ pandas
 numpy
 matplotlib
 seaborn
-ydata-profiling==4.8.3
-pdfkit
-shap
 scikit-learn
+ydata-profiling==4.6.1
 google-generativeai
 python-dotenv
 optuna
+shap
+setuptools
+
 
 
